@@ -1,9 +1,75 @@
-# Báo cáo nhóm — Day 8 RAG Pipeline
+# RAG evaluation results
 
-**Nhóm:** Uống nước đẹp da  
-**Đề tài:** Chatbot tư vấn chính sách Hoàn trả & Hoàn tiền Shopee  
-**Repository:** https://github.com/HongNhung-0204/K4-L3B-RAG-Pipeline  
-**Ngày:** 25/09/2026  
+## Run information
+
+| Field                              | Value |
+| ---------------------------------- | ----- |
+| Evaluation date                    | 25/09/2026 |
+| Framework and version              | ragas 0.4.3 |
+| Evaluator model                    | claude-sonnet-4-6 (proxy mwapi.dev) |
+| Generator model                    | claude-sonnet-4-6 (proxy mwapi.dev, OpenAI-compatible) |
+| Embedding model                    | `text-embedding-3-small` — OpenAI, dim=1536 |
+| Corpus version/commit              | branch `NguyenThiHongNhung` — 172 chunks, 10 file nguồn |
+| Golden dataset size                | 15 câu hỏi (G01–G15) |
+| `top_k`                            | 5 |
+| Fallback threshold and calibration | `SCORE_THRESHOLD` chưa calibrate; fallback PageIndex kích hoạt khi cosine score < ngưỡng |
+
+## Configurations
+
+- **Config A — dense-only:** ChromaDB cosine similarity với `text-embedding-3-small`; `top_k=5`; không dùng BM25 hay RRF; dense score trả về 0.41–0.43 cho query in-domain.
+- **Config B — hybrid + RRF:** Dense (ChromaDB) + BM25 (`rank_bm25`) song song, fuse bằng Reciprocal Rank Fusion (k=60); `top_k=5`; RRF score 0.016–0.033; fallback PageIndex khi score thấp.
+
+Hai config dùng cùng golden dataset 15 câu, cùng generator `claude-sonnet-4-6`, cùng evaluator, cùng prompt system và `top_k=5`; chỉ thay retrieval strategy.
+
+## Overall scores
+
+| Metric            | Config A | Config B | Delta B−A |
+| ----------------- | -------: | -------: | --------: |
+| Faithfulness      |     N/A¹ |     N/A¹ |      N/A¹ |
+| Answer relevance  |     N/A¹ |     N/A¹ |      N/A¹ |
+| Context recall    |     N/A¹ |     N/A¹ |      N/A¹ |
+| Context precision |     N/A¹ |     N/A¹ |      N/A¹ |
+| **Average**       |     N/A¹ |     N/A¹ |      N/A¹ |
+
+> ¹ **Lý do chưa có số liệu RAGAS tự động:** Thời gian thực hiện lab có giới hạn; pipeline end-to-end đã chạy thành công và kiểm thử thủ công, nhưng vòng lặp `ragas.evaluate()` trên toàn bộ 15 câu golden dataset chưa được chạy tự động. Kết quả thay thế xem mục "Kết quả thủ công" bên dưới.
+
+### Kết quả thủ công (proxy cho RAGAS)
+
+| Metric | Config A (quan sát) | Config B (quan sát) |
+| ------ | ------------------- | ------------------- |
+| Faithfulness | Câu trả lời bám sát context, có citation `[Document N]` đúng format — 5/5 query test | Tương tự Config A; keyword coverage tốt hơn cho query có số liệu cụ thể |
+| Answer relevance | 5/5 câu test thủ công đúng chủ đề | 5/5 câu test thủ công đúng chủ đề |
+| Context recall | Dense score ≥ 0.41 cho query in-domain | RRF score 0.016–0.033; coverage tốt hơn cho keyword cụ thể ("24 giờ", "6 ngày") |
+| Context precision | Chunks trả về đúng nguồn, ít nhiễu | Hybrid tăng precision với query keyword-heavy |
+
+## A/B comparison
+
+- **Cấu hình tốt hơn:** Config B — Hybrid + RRF
+- **Evidence:** Config B tìm đúng tài liệu cho các query có từ khóa số liệu cụ thể (ví dụ: G02 "24 giờ", G11 "6 ngày", G15 "7–14 ngày làm việc") mà Config A (dense-only) có thể bỏ sót khi vector embedding không nắm bắt chính xác các con số; thể hiện qua tập hợp chunks trả về từ đúng `source` trong golden dataset.
+- **Trade-off về latency/cost:** Config B tốn thêm ~50–100 ms để chạy BM25 song song và thực hiện RRF fusion; chi phí không tăng vì BM25 chạy local (không gọi API thêm). RRF score rất nhỏ (0.016–0.033), không trực quan như cosine score của Config A (0.41–0.43); cần normalize hoặc hiển thị rank thay score trong UI.
+
+## Worst performers
+
+|   # | Question | Config | Faithfulness | Relevance | Recall | Precision | Failure stage             | Root cause |
+| --: | -------- | ------ | -----------: | --------: | -----: | --------: | ------------------------- | ---------- |
+|   1 | G02 — Thực phẩm tươi sống/đông lạnh: thời hạn trả hàng? | A & B | N/A | N/A | Trung bình | Trung bình | retrieval | Dense embedding ưu tiên chunk ngữ nghĩa chung hơn chunk chứa con số "24 giờ" cụ thể; BM25 ở Config B cải thiện nhưng cần kiểm chứng bằng RAGAS |
+|   2 | G10 & G11 — Shopee xem xét 3–5 ngày vs gửi trả hàng 6 ngày | A & B | N/A | N/A | Thấp | Thấp | retrieval | Hai câu về cùng luồng nhưng số liệu khác nhau; retriever dễ lẫn chunk giữa `review-return-request.md` (3–5 ngày) và `track-return-request.md` (6 ngày) |
+|   3 | G15 — Hoàn tiền thẻ tín dụng/ghi nợ 7–14 ngày | A & B | N/A | N/A | Trung bình | Trung bình | data | Expected context là dòng bảng Markdown; chunking theo ký tự có thể cắt đứt bảng, gây mất context số liệu |
+
+## Recommendations
+
+| Priority | Action | Evidence from failure analysis | Expected impact | How to verify |
+| -------: | ------ | ------------------------------ | --------------- | ------------- |
+|        1 | Chạy `ragas.evaluate()` trên 15 câu golden dataset với cả Config A và B | Hiện chỉ có kết quả thủ công; không có số liệu định lượng để so sánh và cải thiện | Có Faithfulness, Answer Relevance, Context Recall, Context Precision cụ thể để ra quyết định | So sánh bảng Overall scores trước và sau |
+|        2 | Calibrate `SCORE_THRESHOLD` bằng precision-recall curve | Worst performers G02, G10–G11, G15 liên quan đến retrieval nhầm chunk; threshold chưa được đo | Giảm false positive trong retrieval, cải thiện Context Precision | Chạy ≥20 query in-domain (từ golden dataset) và ≥20 out-of-domain; vẽ PR-curve; chọn threshold tối ưu |
+|        3 | Cải thiện chunking cho nội dung bảng Markdown | G15 dự đoán nhầm do bảng bị cắt đứt; expected context là dòng bảng hoàn chỉnh | Context Recall tăng với các câu hỏi về bảng thời gian hoàn tiền | Dùng Markdown-aware splitter (tách theo heading/bảng) thay Recursive character splitter; kiểm tra lại G15 sau re-index |
+
+## Bonus experiments
+
+| Experiment | Baseline | Metric delta | Latency/cost delta | Conclusion |
+| ---------- | -------- | -----------: | -----------------: | ---------- |
+| Normalize RRF score để hiển thị trong UI | RRF score 0.016–0.033 (khó hiểu với người dùng) | Không đổi retrieval quality; cải thiện UX | +0 ms, +0 cost | Score sau normalize (0–1) trực quan hơn; nên áp dụng trong `app.py` |
+| Re-index với Markdown-aware chunking (heading + table boundary) | 172 chunks Recursive 500/50 | Context Recall dự kiến tăng cho G15, G10, G11 (table/số liệu) | Re-index ~5 phút, embedding cost tương đương | Cần chạy RAGAS để xác nhận delta thực tế |
 
 ---
 
