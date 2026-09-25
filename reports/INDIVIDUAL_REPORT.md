@@ -5,17 +5,16 @@ Mỗi thành viên copy template này thành:
 ```text
 reports/<student-id>-<short-name>.md
 ```
-
 Giới hạn khuyến nghị: 1 trang, không chép lại README hoặc mô tả lý thuyết chung. Báo cáo không phải một bài pipeline cá nhân; mục đích là ghi nhận ownership và bằng chứng đóng góp trong sản phẩm nhóm.
 
 ---
 
 ## Thông tin
 
-- Họ và tên:
-- Mã học viên:
-- Nhóm:
-- Repository/branch:
+- Họ và tên: Nguyễn Bảo Sơn   
+- Mã học viên: 2A202602402
+- Nhóm: Uống nước đẹp da
+- Repository/branch: https://github.com/HongNhung-0204/K4-L3B-RAG-Pipeline
 
 ## Phần việc đã thực hiện
 
